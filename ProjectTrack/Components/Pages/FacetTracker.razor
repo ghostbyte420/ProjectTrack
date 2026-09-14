@@ -1,0 +1,148 @@
+@page "/facet-tracker"
+@inject TrackerDataService DataService
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>Facet Tracker</PageTitle>
+
+<div class="page-header">
+    <img src="images/logo.png" alt="ProjectTrack logo" class="page-header-logo" />
+    <h1>Facet Tracker</h1>
+</div>
+
+<div class="tracker-toolbar">
+    <button @onclick="AddEntry">+ Add Entry</button>
+    <button class="danger" @onclick="DeleteSelected">Delete Selected</button>
+    <button @onclick="Export">Export JSON</button>
+    <label class="file-import-label">
+        Import JSON
+        <InputFile OnChange="Import" style="display:none" accept=".json" />
+    </label>
+    @if (!string.IsNullOrEmpty(_statusMessage))
+    {
+        <span>@_statusMessage</span>
+    }
+</div>
+
+<table class="tracker-table">
+    <thead>
+        <tr>
+            <th></th>
+            <th>Priority</th>
+            <th class="map-name-cell">Map Name</th>
+            <th class="coord-cell">Index</th>
+            <th class="map-name-cell">Map Rules</th>
+            <th>Description</th>
+            <th class="coord-cell">X</th>
+            <th class="coord-cell">Y</th>
+            <th>Raw Location</th>
+            <th>Date</th>
+            <th>Cartographer</th>
+            <th>Due Date</th>
+            <th>Due Time</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var entry in DataService.FacetEntries)
+        {
+            <tr class="@entry.Highlight.ToCssClass()">
+                <td><input type="checkbox" @bind="entry.Selected" /></td>
+                <td>
+                    <select @bind="entry.Highlight" @bind:after="Persist">
+                        @foreach (var color in Enum.GetValues<HighlightColor>())
+                        {
+                            <option value="@color">@color</option>
+                        }
+                    </select>
+                </td>
+                <td class="map-name-cell"><input type="text" class="@(IsRequiredFilled(entry.MapName) ? "" : "invalid")" @bind="entry.MapName" @bind:event="oninput" @bind:after="Persist" /></td>
+                <td class="coord-cell"><input type="text" maxlength="5" @bind="entry.MapIndex" @bind:event="oninput" @bind:after="Persist" /></td>
+                <td class="map-name-cell"><input type="text" @bind="entry.MapRules" @bind:event="oninput" @bind:after="Persist" /></td>
+                <td><textarea class="@(IsRequiredFilled(entry.Description) ? "" : "invalid")" @bind="entry.Description" @bind:event="oninput" @bind:after="Persist"></textarea></td>
+                <td class="coord-cell">
+                    <input type="text" maxlength="5" class="@(IsValidCoordinate(entry.CoordinateX) ? "" : "invalid")"
+                           @bind="entry.CoordinateX" @bind:event="oninput" @bind:after="Persist" />
+                </td>
+                <td class="coord-cell">
+                    <input type="text" maxlength="5" class="@(IsValidCoordinate(entry.CoordinateY) ? "" : "invalid")"
+                           @bind="entry.CoordinateY" @bind:event="oninput" @bind:after="Persist" />
+                </td>
+                <td><input type="text" @bind="entry.RawLocation" @bind:event="oninput" @bind:after="Persist" /></td>
+                <td><input type="date" @bind="entry.DateOfEntry" @bind:after="Persist" /></td>
+                <td>
+                    <select @bind="entry.CartographerAssigned" @bind:after="Persist">
+                        <option value="">-- Unassigned --</option>
+                        @foreach (var member in DataService.GetAssignableMembers())
+                        {
+                            <option value="@member.Name">@member.Name</option>
+                        }
+                    </select>
+                </td>
+                <td><input type="date" @bind="entry.DueDate" @bind:after="Persist" /></td>
+                <td><input type="text" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" @bind="entry.DueTimeText" @bind:after="Persist" /></td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private string? _statusMessage;
+
+    protected override void OnInitialized()
+    {
+        DataService.DataChanged += OnDataChanged;
+    }
+
+    private void OnDataChanged() => InvokeAsync(StateHasChanged);
+
+    private static bool IsValidCoordinate(string value)
+        => string.IsNullOrWhiteSpace(value) || double.TryParse(value, out _);
+
+    private void AddEntry()
+    {
+        DataService.FacetEntries.Add(new FacetEntry());
+        Persist();
+    }
+
+    private async Task DeleteSelected()
+    {
+        var count = DataService.FacetEntries.Count(e => e.Selected);
+        if (count == 0)
+        {
+            return;
+        }
+
+        if (await JS.InvokeAsync<bool>("projectTrackConfirm", $"Delete {count} selected entry(ies)? This cannot be undone."))
+        {
+            DataService.FacetEntries.RemoveAll(e => e.Selected);
+            Persist();
+        }
+    }
+
+    private static bool IsRequiredFilled(string value) => !string.IsNullOrWhiteSpace(value);
+
+    private void Persist()
+    {
+        DataService.NotifyChanged();
+    }
+
+    private async Task Export()
+    {
+        var json = DataService.ExportToJson();
+        await JS.InvokeVoidAsync("projectTrackDownload", "projecttrack-data.json", "application/json", json);
+        _statusMessage = "Exported.";
+    }
+
+    private async Task Import(InputFileChangeEventArgs e)
+    {
+        using var stream = new StreamReader(e.File.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024));
+        var json = await stream.ReadToEndAsync();
+        _statusMessage = DataService.ImportFromJson(json) ? "Imported successfully." : "Import failed: invalid JSON.";
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        DataService.DataChanged -= OnDataChanged;
+    }
+}

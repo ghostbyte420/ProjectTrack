@@ -1,0 +1,158 @@
+@page "/team-members"
+@inject TrackerDataService DataService
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>Team Members</PageTitle>
+
+<div class="page-header">
+    <img src="images/logo.png" alt="ProjectTrack logo" class="page-header-logo" />
+    <h1>Team Members</h1>
+</div>
+
+<div class="tracker-toolbar">
+    <button @onclick="AddMember">+ Add Member</button>
+    <button class="danger" @onclick="DeleteSelected">Delete Selected</button>
+    <button @onclick="Export">Export JSON</button>
+    <button @onclick="ExportRoster">Export Roster</button>
+    <label class="file-import-label">
+        Import JSON
+        <InputFile OnChange="Import" style="display:none" accept=".json" />
+    </label>
+    @if (!string.IsNullOrEmpty(_statusMessage))
+    {
+        <span>@_statusMessage</span>
+    }
+</div>
+
+<table class="tracker-table">
+    <thead>
+        <tr>
+            <th></th>
+            <th>Name</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Notations</th>
+            <th>Contact Info</th>
+            <th>Whitelisted</th>
+            <th>Blacklisted</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var member in DataService.TeamMembers)
+        {
+            <tr>
+                <td><input type="checkbox" @bind="member.Selected" /></td>
+                <td><input type="text" class="@(IsRequiredFilled(member.Name) ? "" : "invalid")" @bind="member.Name" @bind:event="oninput" @bind:after="Persist" /></td>
+                <td>
+                    <select @bind="member.Role" @bind:after="Persist">
+                        @foreach (var role in Enum.GetValues<TeamRole>())
+                        {
+                            <option value="@role">@role</option>
+                        }
+                    </select>
+                </td>
+                <td>
+                    <select @bind="member.Status" @bind:after="Persist">
+                        @foreach (var status in Enum.GetValues<MemberStatus>())
+                        {
+                            <option value="@status">@status</option>
+                        }
+                    </select>
+                </td>
+                <td><textarea @bind="member.Notations" @bind:event="oninput" @bind:after="Persist"></textarea></td>
+                <td><input type="text" @bind="member.ContactInfo" @bind:event="oninput" @bind:after="Persist" /></td>
+                <td><input type="checkbox" @bind="member.Whitelisted" @bind:after="() => OnWhitelistedChanged(member)" /></td>
+                <td><input type="checkbox" @bind="member.Blacklisted" @bind:after="() => OnBlacklistedChanged(member)" /></td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private string? _statusMessage;
+
+    protected override void OnInitialized()
+    {
+        DataService.DataChanged += OnDataChanged;
+    }
+
+    private void OnDataChanged() => InvokeAsync(StateHasChanged);
+
+    private void AddMember()
+    {
+        DataService.TeamMembers.Add(new TeamMember());
+        Persist();
+    }
+
+    private async Task DeleteSelected()
+    {
+        var count = DataService.TeamMembers.Count(m => m.Selected);
+        if (count == 0)
+        {
+            return;
+        }
+
+        if (await JS.InvokeAsync<bool>("projectTrackConfirm", $"Delete {count} selected entry(ies)? This cannot be undone."))
+        {
+            DataService.TeamMembers.RemoveAll(m => m.Selected);
+            Persist();
+        }
+    }
+
+    private static bool IsRequiredFilled(string value) => !string.IsNullOrWhiteSpace(value);
+
+    private void OnWhitelistedChanged(TeamMember member)
+    {
+        if (member.Whitelisted)
+        {
+            member.Blacklisted = false;
+        }
+
+        Persist();
+    }
+
+    private void OnBlacklistedChanged(TeamMember member)
+    {
+        if (member.Blacklisted)
+        {
+            member.Whitelisted = false;
+            DataService.UnassignMember(member.Name);
+            _statusMessage = $"{member.Name} was blacklisted and unassigned from all open work. Reassign as needed.";
+        }
+
+        Persist();
+    }
+
+    private void Persist()
+    {
+        DataService.NotifyChanged();
+    }
+
+    private async Task Export()
+    {
+        var json = DataService.ExportToJson();
+        await JS.InvokeVoidAsync("projectTrackDownload", "projecttrack-data.json", "application/json", json);
+        _statusMessage = "Exported.";
+    }
+
+    private async Task ExportRoster()
+    {
+        var html = DataService.GenerateRosterHtml();
+        await JS.InvokeVoidAsync("projectTrackDownload", "projecttrack-roster.html", "text/html", html);
+        _statusMessage = "Roster exported.";
+    }
+
+    private async Task Import(InputFileChangeEventArgs e)
+    {
+        using var stream = new StreamReader(e.File.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024));
+        var json = await stream.ReadToEndAsync();
+        _statusMessage = DataService.ImportFromJson(json) ? "Imported successfully." : "Import failed: invalid JSON.";
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        DataService.DataChanged -= OnDataChanged;
+    }
+}

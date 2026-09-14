@@ -1,0 +1,19 @@
+﻿@inherits LayoutComponentBase
+
+<div class="page">
+    <nav class="tab-nav">
+        <NavLink href="/code-tracker" class="tab-link" Match="NavLinkMatch.All">Code Tracker</NavLink>
+        <NavLink href="/facet-tracker" class="tab-link">Facet Tracker</NavLink>
+        <NavLink href="/team-members" class="tab-link">Team Members</NavLink>
+    </nav>
+    <main class="tab-content">
+        @Body
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>
+
